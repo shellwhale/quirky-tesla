@@ -105,6 +105,16 @@ function Get-UsersFromWorkSheet {
 	return $users;
 }
 
+function Remove-SpecialCharactersFromString {
+	param [string]($string)
+
+	if (condition) {
+		
+	}
+
+	return [Text.Encoding]::ASCII.GetString([Text.Encoding]::GetEncoding(1251).GetBytes($string)).Trim().ToLower().Replace(' ','')
+}
+
 function Get-OrganizationalUnitsPaths {
 	param ($worksheet)
 	# Select every cells belonging in the 'Département' columns accross every worksheets
@@ -133,6 +143,60 @@ function Get-OrganizationalUnitsPaths {
 	return $childOrganizationalsUnitsFullPaths;
 }
 
+function Get-OrganizationalUnitNames {
+	param ($worksheet)
+	$organizationalUnitNames = New-Object System.Collections.Generic.List[System.Object];
+	Get-OrganizationalUnitsPaths -worksheet $worksheet | ForEach-Object -Process { $organizationalUnitNames += $_ }
+
+	return ($organizationalUnitNames | Select-Object -Unique)
+}
+
+function Get-GlobalGroups {
+	param ($worksheet)
+
+	$globalGroups = New-Object System.Collections.Generic.List[System.Object];
+	$organizationalUnitNames = Get-OrganizationalUnitNames -worksheet $worksheet;
+	
+	foreach ($organizationalUnitName in $organizationalUnitNames) {
+		$globalGroup = New-Object -TypeName PSCustomObject;
+
+		$groupName = $organizationalUnitName.Replace(' ','');
+		$groupName = "GG_$groupName";
+		$globalGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $groupName;
+		$globalGroup | Add-Member -MemberType NoteProperty -Name "Location" -Value "Groupes";
+		$globalGroups.Add($globalGroup);
+		
+		$respGlobalGroup = New-Object -TypeName PSCustomObject;
+		$respGroupName = $organizationalUnitName.Replace(' ','');
+		$respGroupName = "GG_Resp$respGroupName";
+		$respGlobalGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $respGroupName;
+		$respGlobalGroup | Add-Member -MemberType NoteProperty -Name "Location" -Value "Groupes";
+		$globalGroups.Add($respGlobalGroup);
+	}
+
+	return ($globalGroups);
+}
+
+function Get-LocalGroups {
+	param ($worksheet)
+	
+	$localGroups = New-Object System.Collections.Generic.List[System.Object];
+	$globalGroups = Get-GlobalGroups -worksheet $worksheet;
+	foreach ($globalGroup in $globalGroups) {
+		$localReadGroup = New-Object -TypeName PSCustomObject;
+		$localReadGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $(($globalGroup.Name).Replace('GG_','GL_R_'));
+		$localReadGroup | Add-Member -MemberType NoteProperty -Name "Location" -Value "Groupes";
+
+		$localReadWriteGroup = New-Object -TypeName PSCustomObject;
+		$localReadWriteGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $(($globalGroup.Name).Replace('GG_','GL_RW_'));
+		$localReadWriteGroup | Add-Member -MemberType NoteProperty -Name "Location" -Value "Groupes";
+
+		$localGroups.Add($localReadWriteGroup);
+		$localGroups.Add($localReadGroup);
+	}
+	return $localGroups
+}
+
 #-----------------------------------------------------------[Execution]------------------------------------------------------------
 
 $worksheet = Get-WorkSheet($SELECTED_WORKSHEET_NUMBER);
@@ -148,3 +212,5 @@ $users = $users | Where-Object {$_ -notin $tooBigUsernames}
 
 $users | Export-Clixml ./output/$SELECTED_WORKSHEET_NUMBER-users.xml;
 $tooBigUsernames | ConvertTo-Json > ./output/$SELECTED_WORKSHEET_NUMBER-invalid-users.json;
+
+$(Get-GlobalGroups -worksheet $worksheet) + $(Get-LocalGroups -worksheet $worksheet) | Export-Clixml ./output/$SELECTED_WORKSHEET_NUMBER-groups.xml;
