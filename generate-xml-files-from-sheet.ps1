@@ -28,7 +28,7 @@ function Generate-Username {
 	param ([string]$firstName, [string]$lastName)
 	$firstName = [Text.Encoding]::ASCII.GetString([Text.Encoding]::GetEncoding(1251).GetBytes($firstName)).Trim().ToLower().Replace(' ','');
 	$lastName = [Text.Encoding]::ASCII.GetString([Text.Encoding]::GetEncoding(1251).GetBytes($lastName)).Trim().ToLower().Replace(' ','');
-	$username = -join($firstName, ".", $lastName);
+	$username = -join($firstName.ToCharArray()[0], ".", $lastName);
 
 	return $username;
 }
@@ -95,7 +95,7 @@ function Get-UsersFromWorkSheet {
 
 		$passwordLength = 7;
 		# Setup a longer passwordLength if the user belong in the Direction OU
-		if ($user.OrganizationalUnit -like "Direction") {
+		if ($user.OrganizationalUnit[0] -like "Direction") {
 			$passwordLength = 15;
 		}
 
@@ -137,5 +137,14 @@ function Get-OrganizationalUnitsPaths {
 
 $worksheet = Get-WorkSheet($SELECTED_WORKSHEET_NUMBER);
 
-Get-OrganizationalUnitsPaths -worksheet $worksheet | Export-Clixml $SELECTED_WORKSHEET_NUMBER-ous.xml;
-Get-UsersFromWorkSheet -worksheet $worksheet | Export-Clixml $SELECTED_WORKSHEET_NUMBER-users.xml;
+Get-OrganizationalUnitsPaths -worksheet $worksheet | Export-Clixml ./output/$SELECTED_WORKSHEET_NUMBER-ous.xml;
+$users = Get-UsersFromWorkSheet -worksheet $worksheet;
+
+# Retrieve users with a username that's too big
+$tooBigUsernames = ($users | Where-Object { $_.Username.Length -gt 20 }); 
+
+# Remove users with a username that's too big fron the $users array
+$users = $users | Where-Object {$_ -notin $tooBigUsernames}
+
+$users | Export-Clixml ./output/$SELECTED_WORKSHEET_NUMBER-users.xml;
+$tooBigUsernames | ConvertTo-Json > ./output/$SELECTED_WORKSHEET_NUMBER-invalid-users.json;
