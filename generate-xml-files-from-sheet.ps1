@@ -90,6 +90,8 @@ function Get-UsersFromWorkSheet {
 		$user | Add-Member -MemberType NoteProperty -Name "InternalNumber" -Value $([int]($u.'N° Interne'));
 		$user | Add-Member -MemberType NoteProperty -Name "Desk" -Value $u.'Bureau';
 		$user | Add-Member -MemberType NoteProperty -Name "OrganizationalUnit" -Value $u.'Département'.Split('/');
+		$userPath = [string]::Format("OU={0},OU={1}",$user.OrganizationalUnit[0], $user.OrganizationalUnit[1]);
+		$user | Add-Member -MemberType NoteProperty -Name "Path" -Value $userPath;
 		$user | Add-Member -MemberType NoteProperty -Name "Username" -Value $(Generate-Username -firstName $u.'Prénom' -lastName $u.'Nom');
 		$user | Add-Member -MemberType NoteProperty -Name "IsManager" -Value $u.'Responsable';
 
@@ -103,16 +105,6 @@ function Get-UsersFromWorkSheet {
 		$users.Add($user);
 	}
 	return $users;
-}
-
-function Remove-SpecialCharactersFromString {
-	param [string]($string)
-
-	if (condition) {
-		
-	}
-
-	return [Text.Encoding]::ASCII.GetString([Text.Encoding]::GetEncoding(1251).GetBytes($string)).Trim().ToLower().Replace(' ','')
 }
 
 function Get-OrganizationalUnitsPaths {
@@ -151,6 +143,30 @@ function Get-OrganizationalUnitNames {
 	return ($organizationalUnitNames | Select-Object -Unique)
 }
 
+function Get-OrganizationalUnits {
+	param ($worksheet)
+	$organizationalUnitsPaths = Get-OrganizationalUnitsPaths -worksheet $worksheet;
+	$organizationalUnits = New-Object System.Collections.Generic.List[System.Object];
+
+	foreach ($organizationalUnitPath in $organizationalUnitsPaths) {
+		$organizationalUnit = New-Object -TypeName PSCustomObject;
+		
+		# Result is in the form of array [OU, OU]
+		if ($organizationalUnitPath -is [System.Array]) {
+			$organizationalUnit | Add-Member -MemberType NoteProperty -Name "Name" -Value $organizationalUnitPath[1];
+			$organizationalUnit | Add-Member -MemberType NoteProperty -Name "Location" -Value $organizationalUnitPath;
+		}
+		# Result is in the form of string OU
+		else {
+			$organizationalUnit | Add-Member -MemberType NoteProperty -Name "Name" -Value $organizationalUnitPath;
+			$organizationalUnit | Add-Member -MemberType NoteProperty -Name "Location" -Value $organizationalUnitPath;
+		}
+		$organizationalUnits.Add($organizationalUnit);
+	}
+
+	return $organizationalUnits
+}
+
 function Get-GlobalGroups {
 	param ($worksheet)
 
@@ -164,6 +180,7 @@ function Get-GlobalGroups {
 		$groupName = "GG_$groupName";
 		$globalGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $groupName;
 		$globalGroup | Add-Member -MemberType NoteProperty -Name "Location" -Value "Groupes";
+		$globalGroup | Add-Member -MemberType NoteProperty -Name "GroupScope" -Value "Global";
 		$globalGroups.Add($globalGroup);
 		
 		$respGlobalGroup = New-Object -TypeName PSCustomObject;
@@ -171,6 +188,7 @@ function Get-GlobalGroups {
 		$respGroupName = "GG_Resp$respGroupName";
 		$respGlobalGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $respGroupName;
 		$respGlobalGroup | Add-Member -MemberType NoteProperty -Name "Location" -Value "Groupes";
+		$respGlobalGroup | Add-Member -MemberType NoteProperty -Name "GroupScope" -Value "Global";
 		$globalGroups.Add($respGlobalGroup);
 	}
 
@@ -184,12 +202,14 @@ function Get-LocalGroups {
 	$globalGroups = Get-GlobalGroups -worksheet $worksheet;
 	foreach ($globalGroup in $globalGroups) {
 		$localReadGroup = New-Object -TypeName PSCustomObject;
-		$localReadGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $(($globalGroup.Name).Replace('GG_','GL_R_'));
+		$localReadGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $(($globalGroup.Name).Replace('GG_','GL_R_partage'));
 		$localReadGroup | Add-Member -MemberType NoteProperty -Name "Location" -Value "Groupes";
+		$localReadGroup | Add-Member -MemberType NoteProperty -Name "GroupScope" -Value "DomainLocal";
 
 		$localReadWriteGroup = New-Object -TypeName PSCustomObject;
-		$localReadWriteGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $(($globalGroup.Name).Replace('GG_','GL_RW_'));
+		$localReadWriteGroup | Add-Member -MemberType NoteProperty -Name "Name" -Value $(($globalGroup.Name).Replace('GG_','GL_RW_partage'));
 		$localReadWriteGroup | Add-Member -MemberType NoteProperty -Name "Location" -Value "Groupes";
+		$localReadWriteGroup | Add-Member -MemberType NoteProperty -Name "GroupScope" -Value "DomainLocal";
 
 		$localGroups.Add($localReadWriteGroup);
 		$localGroups.Add($localReadGroup);
@@ -199,18 +219,23 @@ function Get-LocalGroups {
 
 #-----------------------------------------------------------[Execution]------------------------------------------------------------
 
-$worksheet = Get-WorkSheet($SELECTED_WORKSHEET_NUMBER);
 
-Get-OrganizationalUnitsPaths -worksheet $worksheet | Export-Clixml ./output/$SELECTED_WORKSHEET_NUMBER-ous.xml;
-$users = Get-UsersFromWorkSheet -worksheet $worksheet;
 
-# Retrieve users with a username that's too big
-$tooBigUsernames = ($users | Where-Object { $_.Username.Length -gt 20 }); 
+# Get-OrganizationalUnits -worksheet $worksheet;
 
-# Remove users with a username that's too big fron the $users array
-$users = $users | Where-Object {$_ -notin $tooBigUsernames}
-
-$users | Export-Clixml ./output/$SELECTED_WORKSHEET_NUMBER-users.xml;
-$tooBigUsernames | ConvertTo-Json > ./output/$SELECTED_WORKSHEET_NUMBER-invalid-users.json;
-
-$(Get-GlobalGroups -worksheet $worksheet) + $(Get-LocalGroups -worksheet $worksheet) | Export-Clixml ./output/$SELECTED_WORKSHEET_NUMBER-groups.xml;
+for ($i = 1; $i -lt 12; $i++) {
+	$worksheet = Get-WorkSheet($i);
+	
+	$users = Get-UsersFromWorkSheet -worksheet $worksheet;
+	
+	# Retrieve users with a username that's too big
+	$tooBigUsernames = ($users | Where-Object { $_.Username.Length -gt 20 }); 
+	
+	# Remove users with a username that's too big fron the $users array
+	$users = $users | Where-Object {$_ -notin $tooBigUsernames}
+	
+	$users | Export-Clixml ./output/$i-users.xml;
+	Get-OrganizationalUnits -worksheet $worksheet | Export-Clixml ./output/$i-ous.xml;
+	$tooBigUsernames | ConvertTo-Json > ./output/$i-invalid-users.json;
+	$(Get-GlobalGroups -worksheet $worksheet) + $(Get-LocalGroups -worksheet $worksheet) | Export-Clixml ./output/$i-groups.xml;
+}
