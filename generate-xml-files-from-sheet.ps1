@@ -81,6 +81,8 @@ function Get-WorkSheet($workSheetNumber, $test) {
 function Get-UsersFromWorkSheet {
 	param ($worksheet)
 	$users = New-Object System.Collections.Generic.List[System.Object];
+	$usernames = New-Object System.Collections.Generic.List[System.Object];
+	$usersDuplicates = New-Object System.Collections.Generic.List[System.Object];
 
 	foreach ($u in $worksheet) {
 		$user = New-Object -TypeName PSCustomObject;
@@ -92,7 +94,8 @@ function Get-UsersFromWorkSheet {
 		$user | Add-Member -MemberType NoteProperty -Name "OrganizationalUnit" -Value $u.'Département'.Split('/');
 		$userPath = [string]::Format("OU={0},OU={1}",$user.OrganizationalUnit[0], $user.OrganizationalUnit[1]);
 		$user | Add-Member -MemberType NoteProperty -Name "Path" -Value $userPath;
-		$user | Add-Member -MemberType NoteProperty -Name "Username" -Value $(Generate-Username -firstName $u.'Prénom' -lastName $u.'Nom');
+		$username =  $(Generate-Username -firstName $u.'Prénom' -lastName $u.'Nom');
+		$user | Add-Member -MemberType NoteProperty -Name "Username" -Value $username;
 		$user | Add-Member -MemberType NoteProperty -Name "IsManager" -Value $u.'Responsable';
 
 		$passwordLength = 7;
@@ -100,11 +103,18 @@ function Get-UsersFromWorkSheet {
 		if ($user.OrganizationalUnit[0] -like "Direction") {
 			$passwordLength = 15;
 		}
-
 		$user | Add-Member -MemberType NoteProperty -Name "Password" -Value $(Get-RandomPassword -Length $passwordLength);
-		$users.Add($user);
+
+		if ($username -Notin $usernames) {
+			$users.Add($user);
+			$usernames.Add($username);
+		}
+		else {
+			$usersDuplicates.Add($user);
+		}
+
 	}
-	return $users;
+	return @($users,$usersDuplicates);
 }
 
 function Get-OrganizationalUnitsPaths {
@@ -222,11 +232,12 @@ function Get-LocalGroups {
 
 
 # Get-OrganizationalUnits -worksheet $worksheet;
-
-for ($i = 1; $i -lt 12; $i++) {
+for ($i = 4; $i -lt 8; $i++) {
 	$worksheet = Get-WorkSheet($i);
 	
-	$users = Get-UsersFromWorkSheet -worksheet $worksheet;
+	$results = Get-UsersFromWorkSheet -worksheet $worksheet;
+	$duplicates = $results[1]
+	$users = $results[0]
 	
 	# Retrieve users with a username that's too big
 	$tooBigUsernames = ($users | Where-Object { $_.Username.Length -gt 20 }); 
@@ -236,6 +247,7 @@ for ($i = 1; $i -lt 12; $i++) {
 	
 	$users | Export-Clixml ./output/$i-users.xml;
 	Get-OrganizationalUnits -worksheet $worksheet | Export-Clixml ./output/$i-ous.xml;
-	$tooBigUsernames | ConvertTo-Json > ./output/$i-invalid-users.json;
+	$tooBigUsernames | ConvertTo-Json > ./output/$i-too-long-usernames.json;
+	$duplicates | ConvertTo-Json > ./output/$i-duplicate-usernames.json;
 	$(Get-GlobalGroups -worksheet $worksheet) + $(Get-LocalGroups -worksheet $worksheet) | Export-Clixml ./output/$i-groups.xml;
 }
